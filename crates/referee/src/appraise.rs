@@ -177,11 +177,12 @@ fn ask_checks(
     let Some(ask) = &action.ask else {
         return;
     };
+    let kind = effective_ask_kind(world, ask);
     if let Some(policy) = world
         .org
         .policies
         .iter()
-        .find(|p| p.forbids_disclosure_of == ask.kind)
+        .find(|p| p.forbids_disclosure_of == kind)
     {
         let weight = scale::by_axis(tuning.w_policy, persona.personality.security_awareness);
         score.raise(
@@ -191,7 +192,11 @@ fn ask_checks(
         );
     }
 
-    let gap = i16::from(ask_sensitivity(world, ask)) - i16::from(persona.state.trust.get());
+    // Unresolved asks deflect — don't punish a guessed sensitivity as escalation.
+    let Some(target) = &ask.target else {
+        return;
+    };
+    let gap = i16::from(ask_sensitivity(world, target, ask)) - i16::from(persona.state.trust.get());
     if gap > 0 {
         let weight = (gap * tuning.escalation_pct) / 100;
         if weight > 0 {
@@ -254,9 +259,17 @@ fn principle_fit(principle: Principle, persona: &Persona, base: i16) -> Option<i
     (gain > 0).then_some(gain)
 }
 
-fn ask_sensitivity(world: &World, ask: &Ask) -> u8 {
+fn ask_sensitivity(world: &World, target: &world::SecretId, ask: &Ask) -> u8 {
+    world
+        .secret(target)
+        .map_or(ask.sensitivity_hint, |s| s.sensitivity.get())
+}
+
+/// Kind for policy/red-line checks: the resolved secret's kind when known, else the
+/// Analyst's guess.
+fn effective_ask_kind(world: &World, ask: &Ask) -> world::SecretKind {
     ask.target
         .as_ref()
         .and_then(|id| world.secret(id))
-        .map_or(ask.sensitivity_hint, |s| s.sensitivity.get())
+        .map_or(ask.kind, |s| s.kind)
 }

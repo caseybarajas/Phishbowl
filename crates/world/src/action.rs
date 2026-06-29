@@ -29,6 +29,9 @@ pub struct Claim {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ask {
     pub kind: SecretKind,
+    /// What the contact asked for in their own words (e.g. "VPN enrollment code").
+    /// The engine matches this against secret labels/aliases to resolve a target.
+    pub referent: Option<String>,
     pub target: Option<SecretId>,
     /// Analyst's sensitivity estimate (0..=100) for asks not tied to a known secret.
     pub sensitivity_hint: u8,

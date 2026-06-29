@@ -195,6 +195,8 @@ fn secret(s: dto::SecretDto) -> Secret {
         id: s.id.into(),
         owner: s.owner.into(),
         kind: s.kind.into(),
+        label: s.label,
+        aliases: s.aliases,
         sensitivity: Sensitivity::new(s.sensitivity),
         value: s.value,
         disclosure: DisclosureRule {

@@ -30,6 +30,8 @@ const BASE: &str = r#"(
             id: "vpn",
             owner: "priya",
             kind: DoorCode,
+            label: "VPN enrollment code",
+            aliases: ["enrollment code", "vpn code"],
             sensitivity: 70,
             value: "VPN-7731",
             disclosure: (trust_min: 45, suspicion_max: 50, required_pretext: Some("IT Support"), requires_authorization: false),

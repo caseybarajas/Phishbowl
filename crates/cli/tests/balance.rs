@@ -33,10 +33,11 @@ fn cite(reference: &str) -> ParsedAction {
     }
 }
 
-fn ask_door_code() -> ParsedAction {
+fn ask_vpn_code() -> ParsedAction {
     ParsedAction {
         ask: Some(Ask {
             kind: SecretKind::DoorCode,
+            referent: Some("VPN enrollment code".into()),
             target: None,
             sensitivity_hint: 0,
         }),
@@ -126,7 +127,7 @@ fn patient_verifiable_run_reaches_disclosure_before_detection() {
     );
 
     // 6. Now ask for the door code — every gate is satisfied.
-    let out = step(&mut world, ask_door_code());
+    let out = step(&mut world, ask_vpn_code());
     assert_eq!(
         out.verdict,
         Some(Verdict::Grant),

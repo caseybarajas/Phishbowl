@@ -57,6 +57,8 @@ fn vpn_secret() -> Secret {
         id: "vpn".into(),
         owner: "target".into(),
         kind: SecretKind::DoorCode,
+        label: "VPN enrollment code".into(),
+        aliases: vec!["enrollment code".into(), "vpn code".into()],
         sensitivity: world::Sensitivity::new(70),
         value: "VPN-7731".into(),
         disclosure: DisclosureRule {
@@ -199,6 +201,7 @@ fn password_ask_violates_policy() {
     let mut a = action();
     a.ask = Some(Ask {
         kind: SecretKind::Password,
+        referent: None,
         target: None,
         sensitivity_hint: 80,
     });
@@ -292,6 +295,7 @@ fn escalation_speed_scales_with_gap() {
     let mut a = action();
     a.ask = Some(Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     });
@@ -367,6 +371,7 @@ fn high_security_awareness_makes_policy_violation_cost_more() {
     let mut a = action();
     a.ask = Some(Ask {
         kind: SecretKind::Password,
+        referent: None,
         target: None,
         sensitivity_hint: 80,
     });
@@ -384,6 +389,7 @@ fn grant_when_all_conditions_met() {
     w.player.pretext = Some(it_pretext());
     let ask = Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     };
@@ -399,6 +405,7 @@ fn partial_when_trust_just_short() {
     w.player.pretext = Some(it_pretext());
     let ask = Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     };
@@ -414,6 +421,7 @@ fn deflect_when_ask_is_premature() {
     w.player.pretext = Some(it_pretext());
     let ask = Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     };
@@ -432,6 +440,7 @@ fn deflect_when_pretext_wrong() {
     });
     let ask = Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     };
@@ -447,6 +456,7 @@ fn stall_when_too_suspicious() {
     w.player.pretext = Some(it_pretext());
     let ask = Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     };
@@ -462,6 +472,7 @@ fn refuse_on_policy() {
     w.player.pretext = Some(it_pretext());
     let ask = Ask {
         kind: SecretKind::Password,
+        referent: None,
         target: None,
         sensitivity_hint: 80,
     };
@@ -478,6 +489,7 @@ fn refuse_on_red_line() {
     w.player.pretext = Some(it_pretext());
     let ask = Ask {
         kind: SecretKind::DoorCode,
+        referent: None,
         target: Some("vpn".into()),
         sensitivity_hint: 0,
     };
@@ -485,16 +497,30 @@ fn refuse_on_red_line() {
 }
 
 #[test]
-fn untargeted_ask_stalls_when_busy_else_deflects() {
-    let mut busy = persona(neutral_personality());
-    busy.state.mood = Mood::Busy;
+fn untargeted_ask_deflects_without_escalation() {
+    let w = world(persona(neutral_personality()), vec![]);
+    let mut a = ParsedAction::inert();
+    a.ask = Some(Ask {
+        kind: SecretKind::Info,
+        referent: Some("something vague".into()),
+        target: None,
+        sensitivity_hint: 90,
+    });
+    let out = appraise_with(&w, &a);
+    assert!(!fired(&out.reasons, Rule::EscalationSpeed));
+
+    let busy = {
+        let mut p = persona(neutral_personality());
+        p.state.mood = Mood::Busy;
+        p
+    };
     let w_busy = world(busy, vec![]);
-    let w_free = world(persona(neutral_personality()), vec![]);
     let ask = Ask {
         kind: SecretKind::Info,
+        referent: None,
         target: None,
         sensitivity_hint: 30,
     };
-    assert_eq!(adjudicate_with(&w_busy, &ask).verdict, Verdict::Stall);
-    assert_eq!(adjudicate_with(&w_free, &ask).verdict, Verdict::Deflect);
+    assert_eq!(adjudicate_with(&w_busy, &ask).verdict, Verdict::Deflect);
+    assert_eq!(adjudicate_with(&w, &ask).verdict, Verdict::Deflect);
 }

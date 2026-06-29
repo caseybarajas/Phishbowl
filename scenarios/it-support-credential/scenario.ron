@@ -121,6 +121,8 @@
             id: "priya_vpn_code",
             owner: "priya_v",
             kind: DoorCode,
+            label: "VPN enrollment code",
+            aliases: ["enrollment code", "vpn code", "vpn enrollment"],
             sensitivity: 70,
             value: "VPN-ENROLL-7731",
             disclosure: (
@@ -136,6 +138,8 @@
             id: "priya_password",
             owner: "priya_v",
             kind: Password,
+            label: "password",
+            aliases: ["login password", "account password"],
             sensitivity: 95,
             value: "n0rthw1nd-spring",
             disclosure: (

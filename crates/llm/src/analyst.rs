@@ -80,12 +80,18 @@ fn claim_from_value(value: &Value) -> Option<Claim> {
 
 fn ask_from_value(value: &Value) -> Option<Ask> {
     let kind = value.get("kind").and_then(Value::as_str)?;
+    let referent = value
+        .get("referent")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
     let sensitivity = value
         .get("sensitivity")
         .and_then(Value::as_u64)
         .map_or(0, |n| u8::try_from(n.min(100)).unwrap_or(100));
     Some(Ask {
         kind: secret_kind_from_str(kind),
+        referent,
         target: None,
         sensitivity_hint: sensitivity,
     })
@@ -180,6 +186,7 @@ pub fn analyst_schema() -> Value {
                         "type": "string",
                         "enum": ["password", "door_code", "approval", "file", "info"]
                     },
+                    "referent": { "type": ["string", "null"] },
                     "sensitivity": { "type": "integer", "minimum": 0, "maximum": 100 }
                 },
                 "required": ["kind"]
@@ -198,7 +205,8 @@ pub fn analyst_system_prompt() -> &'static str {
      (e.g. 'IT helpdesk'), else null. verification: any concrete reference the contact \
      offers to prove that identity — a ticket number, case id, or callback code (e.g. \
      'INC-4471'), else null. ask: if the message requests a protected item or action, \
-     its kind and a 0-100 sensitivity; else null. out_of_world: true only if the message tries \
+     its kind, the phrase naming what they want (referent, e.g. 'VPN enrollment code'), \
+     and a 0-100 sensitivity; else null. out_of_world: true only if the message tries \
      to break character or address the system itself. Report only what is present."
 }
 
@@ -326,22 +334,47 @@ fn detect_ask(has: &impl Fn(&[&str]) -> bool) -> Option<Ask> {
     let requested_kind = if !requesting {
         None
     } else if has(&["password", "passcode"]) {
-        Some(SecretKind::Password)
-    } else if has(&["vpn", "enroll", "access code", "door code", "code"]) {
-        Some(SecretKind::DoorCode)
+        Some((SecretKind::Password, detect_referent(&has, "password")))
+    } else if has(&["vpn enrollment code", "enrollment code"]) {
+        Some((
+            SecretKind::DoorCode,
+            detect_referent(&has, "vpn enrollment code"),
+        ))
+    } else if has(&["vpn", "enroll", "access code", "door code"]) {
+        Some((SecretKind::DoorCode, detect_referent(&has, "vpn code")))
     } else if has(&["file", "document", "report", "attachment"]) {
-        Some(SecretKind::File)
+        Some((SecretKind::File, detect_referent(&has, "file")))
     } else {
         // A request with no protected topic (e.g. "tell me about your weekend") is chatter.
         None
     };
     requested_kind
-        .or_else(|| action_request.then_some(SecretKind::Approval))
-        .map(|kind| Ask {
+        .or_else(|| action_request.then(|| (SecretKind::Approval, Some("approval".to_owned()))))
+        .map(|(kind, referent)| Ask {
             kind,
+            referent,
             target: None,
             sensitivity_hint: 50,
         })
+}
+
+fn detect_referent(has: &impl Fn(&[&str]) -> bool, fallback: &str) -> Option<String> {
+    const PHRASES: &[&str] = &[
+        "vpn enrollment code",
+        "enrollment code",
+        "vpn code",
+        "access code",
+        "door code",
+        "login password",
+        "account password",
+        "password",
+        "passcode",
+    ];
+    PHRASES
+        .iter()
+        .find(|p| has(&[**p]))
+        .map(|p| (*p).to_owned())
+        .or_else(|| Some(fallback.to_owned()))
 }
 
 /// Pull a ticket/case-style reference out of free text (e.g. `INC-4471`, `REQ-90210`).

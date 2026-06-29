@@ -1,12 +1,13 @@
-use world::{Adjudication, Ask, CausalEntry, Mood, Persona, Rule, Verdict, World};
+use world::{Adjudication, Ask, CausalEntry, Persona, Rule, SecretKind, Verdict, World};
 
 /// Resolve an ask against the target secret's disclosure rule. Pure: reads state,
 /// returns a verdict. The protected value is released (by the caller) only on `Grant`.
 pub fn adjudicate(world: &World, persona: &Persona, ask: &Ask) -> Adjudication {
-    if persona.red_lines.contains(&ask.kind) {
+    let kind = effective_ask_kind(world, ask);
+    if persona.red_lines.contains(&kind) {
         return verdict(
             Verdict::Refuse,
-            format!("{:?} is a hard red line for {}", ask.kind, persona.name),
+            format!("{kind:?} is a hard red line for {}", persona.name),
         );
     }
 
@@ -14,7 +15,7 @@ pub fn adjudicate(world: &World, persona: &Persona, ask: &Ask) -> Adjudication {
         .org
         .policies
         .iter()
-        .find(|p| p.forbids_disclosure_of == ask.kind)
+        .find(|p| p.forbids_disclosure_of == kind)
     {
         return verdict(
             Verdict::Refuse,
@@ -23,15 +24,9 @@ pub fn adjudicate(world: &World, persona: &Persona, ask: &Ask) -> Adjudication {
     }
 
     let Some(secret_id) = &ask.target else {
-        let stalling = matches!(persona.state.mood, Mood::Busy | Mood::Away);
-        let chosen = if stalling {
-            Verdict::Stall
-        } else {
-            Verdict::Deflect
-        };
         return verdict(
-            chosen,
-            "ask is not tied to a known protected item".to_owned(),
+            Verdict::Deflect,
+            "ask doesn't map to a known protected item — which one do you mean?".to_owned(),
         );
     };
 
@@ -91,6 +86,13 @@ pub fn adjudicate(world: &World, persona: &Persona, ask: &Ask) -> Adjudication {
     }
 
     verdict(Verdict::Deflect, "ask is premature → deflect".to_owned())
+}
+
+fn effective_ask_kind(world: &World, ask: &Ask) -> SecretKind {
+    ask.target
+        .as_ref()
+        .and_then(|id| world.secret(id))
+        .map_or(ask.kind, |s| s.kind)
 }
 
 fn verdict(verdict: Verdict, cause: String) -> Adjudication {

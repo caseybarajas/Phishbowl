@@ -1,7 +1,7 @@
 use llm::{build_performer_prompt, fallback_line, heuristic_parse, OllamaClient, PerformerInput};
 use world::{
-    Appraisal, CausalEntry, ChannelKind, Message, ParsedAction, PersonaId, RunStatus, SalientFact,
-    Sender, SuccessCondition, Verdict, World,
+    Appraisal, Ask, CausalEntry, ChannelKind, Message, ParsedAction, PersonaId, RunStatus,
+    SalientFact, Sender, SuccessCondition, Verdict, World,
 };
 
 pub struct Engine {
@@ -148,20 +148,52 @@ fn analyst_user(body: &str) -> String {
     format!("Message from the contact: \"{body}\"")
 }
 
-/// The Analyst classifies an ask's *kind*; the engine resolves which concrete secret
-/// it targets from what the contact actually owns.
-fn resolve_ask_target(world: &World, contact: &PersonaId, action: &mut ParsedAction) {
+/// Match the Analyst's ask against a concrete secret the contact owns. Referent
+/// (label/aliases) is the primary signal; kind is a fallback when referent is absent
+/// and exactly one owned secret shares that kind.
+pub fn resolve_ask_target(world: &World, contact: &PersonaId, action: &mut ParsedAction) {
     let Some(ask) = action.ask.as_mut() else {
         return;
     };
     if ask.target.is_some() {
         return;
     }
-    ask.target = world
-        .secrets
-        .iter()
-        .find(|s| &s.owner == contact && s.kind == ask.kind)
-        .map(|s| s.id.clone());
+    ask.target = match_ask_to_secret(world, contact, ask);
+}
+
+fn match_ask_to_secret(world: &World, owner: &PersonaId, ask: &Ask) -> Option<world::SecretId> {
+    let candidates: Vec<_> = world.secrets.iter().filter(|s| &s.owner == owner).collect();
+
+    if let Some(referent) = ask.referent.as_deref().filter(|r| !r.is_empty()) {
+        let norm_ref = normalize_phrase(referent);
+        let mut best: Option<(&world::Secret, usize)> = None;
+        for secret in &candidates {
+            for phrase in secret.phrases() {
+                let norm_phrase = normalize_phrase(phrase);
+                if norm_ref.contains(&norm_phrase) || norm_phrase.contains(&norm_ref) {
+                    let score = norm_phrase.len();
+                    if best.is_none_or(|(_, s)| score > s) {
+                        best = Some((secret, score));
+                    }
+                }
+            }
+        }
+        return best.map(|(s, _)| s.id.clone());
+    }
+
+    // Secondary: kind match only when unambiguous.
+    let kind_matches: Vec<_> = candidates.iter().filter(|s| s.kind == ask.kind).collect();
+    if kind_matches.len() == 1 {
+        return Some(kind_matches[0].id.clone());
+    }
+    None
+}
+
+fn normalize_phrase(s: &str) -> String {
+    s.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn commit_appraisal(

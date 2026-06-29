@@ -120,6 +120,9 @@ pub struct SecretDto {
     pub id: String,
     pub owner: String,
     pub kind: SecretKindDto,
+    pub label: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
     pub sensitivity: u8,
     pub value: String,
     pub disclosure: DisclosureDto,
