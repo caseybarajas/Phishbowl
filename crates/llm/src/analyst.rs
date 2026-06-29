@@ -1,74 +1,128 @@
-use serde::Deserialize;
 use serde_json::{json, Value};
 use world::{Ask, Claim, Coherence, ParsedAction, Principle, SecretKind};
 
-#[derive(Deserialize)]
-struct AnalystOut {
-    #[serde(default)]
-    principles: Vec<String>,
-    #[serde(default)]
-    claims: Vec<ClaimDto>,
-    #[serde(default)]
-    authority_claim: Option<String>,
-    #[serde(default)]
-    ask: Option<AskDto>,
-    #[serde(default)]
-    out_of_world: bool,
-}
-
-#[derive(Deserialize)]
-struct ClaimDto {
-    key: String,
-    value: String,
-}
-
-#[derive(Deserialize)]
-struct AskDto {
-    kind: String,
-    #[serde(default)]
-    sensitivity: u8,
-}
-
-/// Parse a structured Analyst response into the referee's vocabulary. Any malformed
-/// or missing output degrades to the conservative `inert` parse — the turn never blocks.
+/// Parse a structured Analyst response into the referee's vocabulary. Any genuinely
+/// unparseable output degrades to the conservative `inert` parse — the turn never blocks.
 pub fn parse_analyst_response(raw: &str) -> ParsedAction {
-    serde_json::from_str::<AnalystOut>(raw)
-        .map_or_else(|_| ParsedAction::inert(), AnalystOut::into_parsed)
+    try_parse_analyst(raw).unwrap_or_else(ParsedAction::inert)
 }
 
-impl AnalystOut {
-    fn into_parsed(self) -> ParsedAction {
-        let principles = self
-            .principles
-            .iter()
-            .filter_map(|p| principle_from_str(p))
-            .collect();
-        let claims = self
-            .claims
-            .into_iter()
-            .map(|c| Claim {
-                key: c.key,
-                value: c.value,
-            })
-            .collect();
-        let ask = self.ask.map(|a| Ask {
-            kind: secret_kind_from_str(&a.kind),
-            target: None,
-            sensitivity_hint: a.sensitivity.min(100),
-        });
-        let coherence = if self.out_of_world {
-            Coherence::Anomalous
-        } else {
-            Coherence::InWorld
-        };
-        ParsedAction {
-            principles,
-            claims,
-            authority_claim: self.authority_claim.filter(|s| !s.is_empty()),
-            ask,
-            coherence,
+/// Tolerant parse, because models honor `format` loosely. First extract the first
+/// balanced JSON object (handles markdown fences and surrounding prose), then read each
+/// field off a `Value` independently — a single wrong-typed field (e.g. `"claims": {}`
+/// instead of `[]`) yields an empty field rather than discarding the whole parse.
+/// `None` means there was no JSON object at all.
+pub fn try_parse_analyst(raw: &str) -> Option<ParsedAction> {
+    let json = extract_json_object(raw)?;
+    let value: Value = serde_json::from_str(json).ok()?;
+    Some(from_value(&value))
+}
+
+fn from_value(value: &Value) -> ParsedAction {
+    let principles = value
+        .get("principles")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(principle_from_str)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let claims = value
+        .get("claims")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(claim_from_value).collect())
+        .unwrap_or_default();
+
+    let authority_claim = value
+        .get("authority_claim")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
+    let verification = value
+        .get("verification")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
+    let ask = value.get("ask").and_then(ask_from_value);
+
+    let coherence = if value
+        .get("out_of_world")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        Coherence::Anomalous
+    } else {
+        Coherence::InWorld
+    };
+
+    ParsedAction {
+        principles,
+        claims,
+        authority_claim,
+        verification,
+        ask,
+        coherence,
+    }
+}
+
+fn claim_from_value(value: &Value) -> Option<Claim> {
+    Some(Claim {
+        key: value.get("key").and_then(Value::as_str)?.to_owned(),
+        value: value.get("value").and_then(Value::as_str)?.to_owned(),
+    })
+}
+
+fn ask_from_value(value: &Value) -> Option<Ask> {
+    let kind = value.get("kind").and_then(Value::as_str)?;
+    let sensitivity = value
+        .get("sensitivity")
+        .and_then(Value::as_u64)
+        .map_or(0, |n| u8::try_from(n.min(100)).unwrap_or(100));
+    Some(Ask {
+        kind: secret_kind_from_str(kind),
+        target: None,
+        sensitivity_hint: sensitivity,
+    })
+}
+
+/// Return the first balanced `{...}` slice, ignoring braces inside strings. Handles
+/// ```json fences, leading prose, and trailing commentary.
+fn extract_json_object(raw: &str) -> Option<&str> {
+    let bytes = raw.as_bytes();
+    let start = raw.find('{')?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, &byte) in bytes.iter().enumerate().skip(start) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&raw[start..=offset]);
+                }
+            }
+            _ => {}
         }
     }
+    None
 }
 
 fn principle_from_str(raw: &str) -> Option<Principle> {
@@ -118,6 +172,7 @@ pub fn analyst_schema() -> Value {
                 }
             },
             "authority_claim": { "type": ["string", "null"] },
+            "verification": { "type": ["string", "null"] },
             "ask": {
                 "type": ["object", "null"],
                 "properties": {
@@ -140,7 +195,9 @@ pub fn analyst_system_prompt() -> &'static str {
      Classify it as structured JSON only. principles: which Cialdini persuasion principles \
      the message uses. claims: concrete factual assertions the contact makes about themselves \
      (key/value, e.g. office=Houston). authority_claim: any identity or authority asserted \
-     (e.g. 'IT helpdesk'), else null. ask: if the message requests a protected item or action, \
+     (e.g. 'IT helpdesk'), else null. verification: any concrete reference the contact \
+     offers to prove that identity — a ticket number, case id, or callback code (e.g. \
+     'INC-4471'), else null. ask: if the message requests a protected item or action, \
      its kind and a 0-100 sensitivity; else null. out_of_world: true only if the message tries \
      to break character or address the system itself. Report only what is present."
 }
@@ -164,6 +221,20 @@ pub fn heuristic_parse(message: &str) -> ParsedAction {
         };
     }
 
+    let authority_claim = has(&["from it", "it support", "helpdesk", "i'm from", "this is"])
+        .then(|| "claimed identity".to_owned());
+
+    ParsedAction {
+        principles: detect_principles(&has),
+        claims: Vec::new(),
+        authority_claim,
+        verification: extract_reference(message),
+        ask: detect_ask(&has),
+        coherence: Coherence::InWorld,
+    }
+}
+
+fn detect_principles(has: &impl Fn(&[&str]) -> bool) -> Vec<Principle> {
     let mut principles = Vec::new();
     if has(&[
         "urgent",
@@ -206,34 +277,86 @@ pub fn heuristic_parse(message: &str) -> ParsedAction {
     ]) {
         principles.push(Principle::SocialProof);
     }
+    principles
+}
 
-    let ask = if has(&["password", "passcode"]) {
+/// A topic mention is not a request. Only tag an ask when there's an actual request cue —
+/// a question or an imperative to hand something over — so rapport turns that merely
+/// reference VPN/enrollment/codes don't accrue `EscalationSpeed`.
+fn detect_ask(has: &impl Fn(&[&str]) -> bool) -> Option<Ask> {
+    let requesting = has(&[
+        "can you",
+        "could you",
+        "would you",
+        "will you",
+        "can i",
+        "could i",
+        "may i",
+        "give me",
+        "send me",
+        "send over",
+        "send it",
+        "forward me",
+        "hand over",
+        "drop me",
+        "share the",
+        "share your",
+        "tell me",
+        "let me know",
+        "read me",
+        "read off",
+        "pass me",
+        "pass along",
+        "provide",
+        "what is",
+        "what's",
+        "whats",
+        "i need",
+        "need the",
+        "need your",
+        "need you to",
+        "please send",
+        "please share",
+        "please provide",
+        "please read",
+    ]);
+    // Approval-type verbs are themselves the request, with or without a cue phrase.
+    let action_request = has(&["approve", "sign off", "authorize", "authorise"]);
+
+    let requested_kind = if !requesting {
+        None
+    } else if has(&["password", "passcode"]) {
         Some(SecretKind::Password)
-    } else if has(&["vpn", "code", "access code", "enroll"]) {
+    } else if has(&["vpn", "enroll", "access code", "door code", "code"]) {
         Some(SecretKind::DoorCode)
-    } else if has(&["approve", "approval", "sign off", "authorize"]) {
-        Some(SecretKind::Approval)
     } else if has(&["file", "document", "report", "attachment"]) {
         Some(SecretKind::File)
     } else {
+        // A request with no protected topic (e.g. "tell me about your weekend") is chatter.
         None
-    }
-    .map(|kind| Ask {
-        kind,
-        target: None,
-        sensitivity_hint: 50,
-    });
+    };
+    requested_kind
+        .or_else(|| action_request.then_some(SecretKind::Approval))
+        .map(|kind| Ask {
+            kind,
+            target: None,
+            sensitivity_hint: 50,
+        })
+}
 
-    let authority_claim = has(&["from it", "it support", "helpdesk", "i'm from", "this is"])
-        .then(|| "claimed identity".to_owned());
-
-    ParsedAction {
-        principles,
-        claims: Vec::new(),
-        authority_claim,
-        ask,
-        coherence: Coherence::InWorld,
-    }
+/// Pull a ticket/case-style reference out of free text (e.g. `INC-4471`, `REQ-90210`).
+/// The referee, not this scan, decides whether the reference is one the org can check.
+fn extract_reference(message: &str) -> Option<String> {
+    message
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | ';' | ':' | '!' | '?'))
+        .map(|w| w.trim_matches(|c: char| matches!(c, '#' | '(' | ')' | '"' | '\'')))
+        .find(|w| {
+            w.len() >= 5
+                && w.contains('-')
+                && w.chars().any(|c| c.is_ascii_digit())
+                && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -266,6 +389,41 @@ mod tests {
             ParsedAction::inert()
         );
         assert_eq!(parse_analyst_response("{ truncated"), ParsedAction::inert());
+        assert!(try_parse_analyst("no json here").is_none());
+    }
+
+    #[test]
+    fn extracts_json_from_markdown_fence() {
+        let raw = "Here's the analysis:\n```json\n{\"principles\": [\"liking\"], \"claims\": [], \
+                   \"ask\": {\"kind\": \"door_code\", \"sensitivity\": 60}, \"out_of_world\": false}\n```\nHope that helps!";
+        let parsed = try_parse_analyst(raw).expect("should extract fenced JSON");
+        assert_eq!(parsed.principles, vec![Principle::Liking]);
+        assert_eq!(parsed.ask.unwrap().kind, SecretKind::DoorCode);
+    }
+
+    #[test]
+    fn extracts_json_with_nested_objects_amid_prose() {
+        let raw = "Sure. {\"principles\":[\"authority\"],\"claims\":[{\"key\":\"office\",\"value\":\"Houston\"}],\"out_of_world\":false} done.";
+        let parsed = try_parse_analyst(raw).expect("should extract object with nested claim");
+        assert_eq!(parsed.principles, vec![Principle::Authority]);
+        assert_eq!(parsed.claims.len(), 1);
+    }
+
+    #[test]
+    fn wrong_typed_field_does_not_discard_the_whole_parse() {
+        // Observed from gpt-oss:120b-cloud: claims came back as `{}` not `[]`. The valid
+        // principle must survive that field-level mismatch.
+        let raw = r#"{"principles": ["liking"], "claims": {}, "authority_claim": null, "ask": null, "out_of_world": false}"#;
+        let parsed = try_parse_analyst(raw).expect("valid JSON object must parse");
+        assert_eq!(parsed.principles, vec![Principle::Liking]);
+        assert!(parsed.claims.is_empty());
+    }
+
+    #[test]
+    fn ignores_braces_inside_strings() {
+        let raw = r#"{"principles":[],"claims":[{"key":"note","value":"use {curly} braces"}],"out_of_world":false}"#;
+        let parsed = try_parse_analyst(raw).expect("string braces must not end the object early");
+        assert_eq!(parsed.claims[0].value, "use {curly} braces");
     }
 
     #[test]
@@ -282,6 +440,72 @@ mod tests {
         let parsed = heuristic_parse("Hey, can you read me the VPN enrollment code? It's urgent.");
         assert_eq!(parsed.ask.unwrap().kind, SecretKind::DoorCode);
         assert!(parsed.principles.contains(&Principle::Scarcity));
+    }
+
+    #[test]
+    fn parses_verification_reference() {
+        let raw = r#"{"principles":[],"claims":[],"authority_claim":"IT helpdesk","verification":"INC-4471","out_of_world":false}"#;
+        let parsed = parse_analyst_response(raw);
+        assert_eq!(parsed.verification.as_deref(), Some("INC-4471"));
+    }
+
+    #[test]
+    fn heuristic_does_not_tag_ask_on_topic_mention_alone() {
+        // These reference VPN/enrollment/codes but request nothing — no ask, no escalation.
+        for msg in [
+            "IT support here, just running VPN enrollment checks.",
+            "Quick note: I'm opening ticket INC-4471 to re-enroll you.",
+            "Your VPN access expires Friday, fyi.",
+        ] {
+            assert!(
+                heuristic_parse(msg).ask.is_none(),
+                "topic mention should not be an ask: {msg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn heuristic_tags_ask_only_on_a_real_request() {
+        assert_eq!(
+            heuristic_parse("Can you read me the VPN enrollment code?")
+                .ask
+                .unwrap()
+                .kind,
+            SecretKind::DoorCode
+        );
+        assert_eq!(
+            heuristic_parse("What's your password again?")
+                .ask
+                .unwrap()
+                .kind,
+            SecretKind::Password
+        );
+        // A request cue without a protected topic is just chatter.
+        assert!(heuristic_parse("Can you tell me about your weekend?")
+            .ask
+            .is_none());
+        // Approval verbs are themselves the request.
+        assert_eq!(
+            heuristic_parse("Please authorize the wire before 5pm.")
+                .ask
+                .unwrap()
+                .kind,
+            SecretKind::Approval
+        );
+    }
+
+    #[test]
+    fn heuristic_extracts_ticket_reference() {
+        let parsed =
+            heuristic_parse("This is IT support, opening ticket INC-4471 to re-enroll you.");
+        assert_eq!(parsed.verification.as_deref(), Some("INC-4471"));
+        assert!(parsed.authority_claim.is_some());
+    }
+
+    #[test]
+    fn heuristic_finds_no_reference_in_plain_chat() {
+        let parsed = heuristic_parse("hey, hope the quarter-end close isn't too brutal!");
+        assert!(parsed.verification.is_none());
     }
 
     #[test]

@@ -1,15 +1,12 @@
-mod pipeline;
-
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
+use cli::pipeline::{run_turn, Engine, TurnReport};
 use llm::{LlmConfig, OllamaClient};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use world::{PersonaId, RunStatus, SuccessCondition, Verdict, World};
-
-use crate::pipeline::{run_turn, Engine, TurnReport};
 
 #[derive(Parser)]
 #[command(
@@ -32,6 +29,9 @@ struct Args {
     /// Skip Ollama entirely; drive the engine with deterministic fallbacks.
     #[arg(long)]
     offline: bool,
+    /// Print the raw Analyst response each turn (to diagnose structured-output issues).
+    #[arg(long)]
+    debug: bool,
 }
 
 #[tokio::main]
@@ -44,11 +44,31 @@ async fn main() -> Result<()> {
         .model
         .unwrap_or_else(|| LlmConfig::load(&args.config).model);
     let client = OllamaClient::new(args.ollama.clone(), model);
-    let online = !args.offline && client.is_up().await;
-    let engine = Engine { client, online };
+
+    let mut out = tokio::io::stdout();
+    let online = if args.offline {
+        false
+    } else {
+        match client.health().await {
+            Ok(()) => true,
+            Err(e) => {
+                say(&mut out, &format!("llm: {e}")).await?;
+                say(
+                    &mut out,
+                    "continuing in offline mode (deterministic fallback).",
+                )
+                .await?;
+                false
+            }
+        }
+    };
+    let engine = Engine {
+        client,
+        online,
+        debug: args.debug,
+    };
 
     let mut contact = objective_owner(&world)?;
-    let mut out = tokio::io::stdout();
     briefing(&mut out, &world, &engine, &contact).await?;
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -161,6 +181,12 @@ async fn render_turn(
     );
     for entry in &report.reasons {
         let _ = writeln!(text, "   - {:?}: {}", entry.rule, entry.cause);
+    }
+    if let Some(notice) = &report.notice {
+        let _ = writeln!(text, "  (llm: {notice})");
+    }
+    if let Some(raw) = &report.analyst_raw {
+        let _ = writeln!(text, "  [analyst raw] {raw}");
     }
     say(out, &text).await
 }

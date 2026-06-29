@@ -76,6 +76,12 @@ pub enum Mood {
 pub struct Beliefs {
     pub accepted_pretext: Option<String>,
     pub salient_facts: Vec<SalientFact>,
+    /// The authority/identity the contact has already taken on the record. A standing
+    /// claim is scrutinized once on establishment, not re-penalized every turn.
+    pub established_authority: Option<String>,
+    /// The contact has produced a reference the org could actually check, which
+    /// settles standing authority doubt.
+    pub authority_verified: bool,
 }
 
 #[derive(Debug, Clone)]

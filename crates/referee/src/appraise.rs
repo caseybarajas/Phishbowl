@@ -11,6 +11,7 @@ pub fn appraise(world: &World, persona: &Persona, action: &ParsedAction) -> Appr
     coherence_check(&mut score, tuning, action);
     consistency_check(&mut score, tuning, persona, action);
     authority_check(&mut score, tuning, world, persona, action);
+    verification_check(&mut score, tuning, world, persona, action);
     ask_checks(&mut score, tuning, world, persona, action);
     principle_checks(&mut score, tuning, persona, action);
     rapport_check(&mut score, tuning, persona, action);
@@ -44,6 +45,15 @@ impl Score {
         self.reasons.push(CausalEntry {
             rule,
             weight,
+            cause,
+        });
+    }
+
+    fn relieve(&mut self, rule: Rule, weight: i16, cause: String) {
+        self.suspicion -= weight;
+        self.reasons.push(CausalEntry {
+            rule,
+            weight: -weight,
             cause,
         });
     }
@@ -84,6 +94,10 @@ fn consistency_check(score: &mut Score, tuning: &Tuning, persona: &Persona, acti
     }
 }
 
+/// An authority claim is scrutinized once, when it goes on the record. A claim already
+/// established is a standing condition — re-referencing it the same way doesn't compound.
+/// A *new or changed* claim re-opens scrutiny. The engine records the established claim
+/// in `commit` after this runs, so the establishing turn still pays the one-time cost.
 fn authority_check(
     score: &mut Score,
     tuning: &Tuning,
@@ -94,6 +108,11 @@ fn authority_check(
     let Some(authority) = &action.authority_claim else {
         return;
     };
+    let standing =
+        persona.state.beliefs.established_authority.as_deref() == Some(authority.as_str());
+    if standing {
+        return;
+    }
     let pretext = world.player.pretext.as_ref();
     if pretext.is_some_and(|p| p.internal_claim) {
         let weight = scale::by_axis(
@@ -103,7 +122,9 @@ fn authority_check(
         score.raise(
             Rule::ChannelOddity,
             weight,
-            format!("external contact claims to be internal staff: {authority}"),
+            format!(
+                "external contact claims to be internal staff (now on the record): {authority}"
+            ),
         );
     }
     if pretext.is_none_or(|p| !p.verifiable) {
@@ -112,6 +133,38 @@ fn authority_check(
             Rule::AuthorityMismatch,
             weight,
             format!("claims authority it can't substantiate: {authority}"),
+        );
+    }
+}
+
+/// Closes the verification loop: a contact who cites a reference the org can actually
+/// check settles standing authority doubt. Credited once — `commit` then marks the
+/// persona verified so it isn't re-mined every turn.
+fn verification_check(
+    score: &mut Score,
+    tuning: &Tuning,
+    world: &World,
+    persona: &Persona,
+    action: &ParsedAction,
+) {
+    let Some(reference) = action.verification.as_deref() else {
+        return;
+    };
+    if persona.state.beliefs.authority_verified {
+        return;
+    }
+    if !world.org.verifiable_refs.iter().any(|r| r == reference) {
+        return;
+    }
+    let weight = scale::by_axis(
+        tuning.w_verification,
+        persona.personality.security_awareness,
+    );
+    if weight > 0 {
+        score.relieve(
+            Rule::AuthorityVerified,
+            weight,
+            format!("cited a reference the org can check ({reference}) → authority stands"),
         );
     }
 }

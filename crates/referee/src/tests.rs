@@ -86,6 +86,7 @@ fn world(persona: Persona, policies: Vec<Policy>) -> World {
                 security_conscious: true,
             },
             policies,
+            verifiable_refs: vec!["INC-4471".into()],
         },
         personas: vec![persona],
         secrets: vec![vpn_secret()],
@@ -214,6 +215,86 @@ fn internal_claim_from_outside_is_an_oddity_and_unverifiable_authority() {
     let out = appraise_with(&w, &a);
     assert!(fired(&out.reasons, Rule::ChannelOddity));
     assert!(fired(&out.reasons, Rule::AuthorityMismatch));
+}
+
+#[test]
+fn established_authority_is_not_re_penalized() {
+    let mut p = persona(neutral_personality());
+    // The same claim is already on the record from a prior turn.
+    p.state.beliefs.established_authority = Some("IT helpdesk".into());
+    let mut w = world(p, vec![]);
+    w.player.pretext = Some(it_pretext());
+    let mut a = action();
+    a.authority_claim = Some("IT helpdesk".into());
+    let out = appraise_with(&w, &a);
+    assert!(!fired(&out.reasons, Rule::ChannelOddity));
+    assert!(!fired(&out.reasons, Rule::AuthorityMismatch));
+}
+
+#[test]
+fn a_changed_authority_claim_reopens_scrutiny() {
+    let mut p = persona(neutral_personality());
+    p.state.beliefs.established_authority = Some("IT helpdesk".into());
+    let mut w = world(p, vec![]);
+    w.player.pretext = Some(it_pretext());
+    let mut a = action();
+    a.authority_claim = Some("the CFO's office".into());
+    let out = appraise_with(&w, &a);
+    assert!(fired(&out.reasons, Rule::AuthorityMismatch));
+}
+
+#[test]
+fn checkable_reference_relieves_standing_authority_suspicion() {
+    let mut p = persona(neutral_personality());
+    p.state.suspicion = Suspicion::new(40);
+    p.state.beliefs.established_authority = Some("IT helpdesk".into());
+    let w = world(p, vec![]);
+    let mut a = action();
+    a.verification = Some("INC-4471".into());
+    let out = appraise_with(&w, &a);
+    assert!(out.suspicion_delta < 0);
+    assert!(fired(&out.reasons, Rule::AuthorityVerified));
+}
+
+#[test]
+fn unverifiable_reference_earns_no_relief() {
+    let p = persona(neutral_personality());
+    let w = world(p, vec![]);
+    let mut a = action();
+    a.verification = Some("INC-9999".into());
+    let out = appraise_with(&w, &a);
+    assert!(!fired(&out.reasons, Rule::AuthorityVerified));
+}
+
+#[test]
+fn already_verified_persona_is_not_re_credited() {
+    let mut p = persona(neutral_personality());
+    p.state.beliefs.authority_verified = true;
+    let w = world(p, vec![]);
+    let mut a = action();
+    a.verification = Some("INC-4471".into());
+    let out = appraise_with(&w, &a);
+    assert!(!fired(&out.reasons, Rule::AuthorityVerified));
+}
+
+#[test]
+fn inconsistency_is_credited_distinctly_from_channel_oddity() {
+    // A name slip contradicts a stored fact: that is an Inconsistency, not a channel tell.
+    let mut p = persona(neutral_personality());
+    p.state.beliefs.salient_facts.push(SalientFact {
+        key: "name".into(),
+        value: "Alex".into(),
+        turn: 1,
+    });
+    let w = world(p, vec![]);
+    let mut a = action();
+    a.claims.push(Claim {
+        key: "name".into(),
+        value: "Alexa".into(),
+    });
+    let out = appraise_with(&w, &a);
+    assert!(fired(&out.reasons, Rule::Inconsistency));
+    assert!(!fired(&out.reasons, Rule::ChannelOddity));
 }
 
 #[test]

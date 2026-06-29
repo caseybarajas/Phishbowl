@@ -1,12 +1,13 @@
 use llm::{build_performer_prompt, fallback_line, heuristic_parse, OllamaClient, PerformerInput};
 use world::{
-    CausalEntry, ChannelKind, Message, ParsedAction, PersonaId, RunStatus, SalientFact, Sender,
-    SuccessCondition, Verdict, World,
+    Appraisal, CausalEntry, ChannelKind, Message, ParsedAction, PersonaId, RunStatus, SalientFact,
+    Sender, SuccessCondition, Verdict, World,
 };
 
 pub struct Engine {
     pub client: OllamaClient,
     pub online: bool,
+    pub debug: bool,
 }
 
 pub struct TurnReport {
@@ -17,6 +18,10 @@ pub struct TurnReport {
     pub verdict: Option<Verdict>,
     pub reasons: Vec<CausalEntry>,
     pub status: RunStatus,
+    /// A one-line LLM error (auth / not running / malformed Analyst output) for this turn.
+    pub notice: Option<String>,
+    /// Raw Analyst response, carried only under `--debug`.
+    pub analyst_raw: Option<String>,
 }
 
 /// The whole turn, as the five named steps from ARCHITECTURE.md. State changes
@@ -28,43 +33,60 @@ pub async fn run_turn(
     body: &str,
 ) -> TurnReport {
     let turn = world.clock + 1;
+    let mut notice = None;
+    let mut analyst_raw = None;
 
     // 1. Perceive — record the message, parse intent (Analyst, or heuristic offline).
     push_message(world, turn, Sender::Player, body.to_owned());
     let mut action = if engine.online {
-        engine
+        match engine
             .client
             .analyze(llm::analyst_system_prompt(), &analyst_user(body))
             .await
+        {
+            Ok(analysis) => {
+                if engine.debug {
+                    analyst_raw = Some(analysis.raw);
+                } else if !analysis.parsed {
+                    notice = Some(
+                        "Analyst output wasn't valid JSON — rode inert fallback (try a model \
+                         that honors structured output, or --debug to see the raw reply)"
+                            .to_owned(),
+                    );
+                }
+                analysis.action
+            }
+            Err(e) => {
+                notice = Some(e.to_string());
+                heuristic_parse(body)
+            }
+        }
     } else {
         heuristic_parse(body)
     };
-    resolve_ask_target(world, contact, &mut action);
-
-    // 2. Appraise — referee deltas, applied before any dialogue. Pure.
-    let appraisal = {
-        let persona = world.persona(contact).expect("contact exists");
-        referee::appraise(world, persona, &action)
-    };
-    apply_appraisal(world, contact, turn, &action, &appraisal);
-
-    // 3. Adjudicate — resolve any ask against the disclosure rule. Pure.
-    let adjudication = action.ask.as_ref().map(|ask| {
-        let persona = world.persona(contact).expect("contact exists");
-        referee::adjudicate(world, persona, ask)
-    });
-    let verdict = adjudication.as_ref().map(|a| a.verdict);
+    // 2-3. Appraise + adjudicate — the pure referee core, with its state committed.
+    let StepOutcome {
+        appraisal,
+        verdict,
+        verdict_reasons,
+    } = referee_step(world, contact, &mut action, turn);
 
     // 4. Generate — Performer writes the reply, handed the verdict as a constraint and
     // the protected value only on Grant.
     let granted_value = grant_value(world, &action, verdict);
-    let reply = generate(world, engine, contact, verdict, granted_value.as_deref()).await;
+    let reply = generate(
+        world,
+        engine,
+        contact,
+        verdict,
+        granted_value.as_deref(),
+        &mut notice,
+    )
+    .await;
 
     // 5. Commit — persist reply, causal log, grant/detection effects, advance the clock.
     let mut reasons = appraisal.reasons;
-    if let Some(adj) = adjudication {
-        reasons.extend(adj.reasons);
-    }
+    reasons.extend(verdict_reasons);
     let speaker = world.persona(contact).expect("contact exists").name.clone();
     push_message(world, turn, Sender::Persona(contact.clone()), reply.clone());
     world.log.record(turn, contact, reasons.clone());
@@ -78,6 +100,47 @@ pub async fn run_turn(
         verdict,
         reasons,
         status: world.status,
+        notice,
+        analyst_raw,
+    }
+}
+
+/// The pure referee core of a turn: resolve the ask, appraise, commit the resulting
+/// state (deltas, principle history, salient facts, established-claim and verification
+/// flags), then adjudicate any ask. No I/O, no model — the part a balance test can drive.
+pub struct StepOutcome {
+    pub appraisal: Appraisal,
+    pub verdict: Option<Verdict>,
+    pub verdict_reasons: Vec<CausalEntry>,
+}
+
+pub fn referee_step(
+    world: &mut World,
+    contact: &PersonaId,
+    action: &mut ParsedAction,
+    turn: u32,
+) -> StepOutcome {
+    resolve_ask_target(world, contact, action);
+
+    let appraisal = {
+        let persona = world.persona(contact).expect("contact exists");
+        referee::appraise(world, persona, action)
+    };
+    commit_appraisal(world, contact, turn, action, &appraisal);
+
+    let (verdict, verdict_reasons) = match action.ask.as_ref() {
+        Some(ask) => {
+            let persona = world.persona(contact).expect("contact exists");
+            let adj = referee::adjudicate(world, persona, ask);
+            (Some(adj.verdict), adj.reasons)
+        }
+        None => (None, Vec::new()),
+    };
+
+    StepOutcome {
+        appraisal,
+        verdict,
+        verdict_reasons,
     }
 }
 
@@ -101,13 +164,20 @@ fn resolve_ask_target(world: &World, contact: &PersonaId, action: &mut ParsedAct
         .map(|s| s.id.clone());
 }
 
-fn apply_appraisal(
+fn commit_appraisal(
     world: &mut World,
     contact: &PersonaId,
     turn: u32,
     action: &ParsedAction,
-    appraisal: &world::Appraisal,
+    appraisal: &Appraisal,
 ) {
+    // The verification check (in `appraise`) already read the *pre-turn* flag; resolve
+    // checkability here, before the mutable borrow, so we can latch it afterwards.
+    let newly_verified = action
+        .verification
+        .as_deref()
+        .is_some_and(|reference| world.org.verifiable_refs.iter().any(|r| r == reference));
+
     let persona = world.persona_mut(contact).expect("contact exists");
     persona.state.suspicion = persona.state.suspicion.apply(appraisal.suspicion_delta);
     persona.state.trust = persona.state.trust.apply(appraisal.trust_delta);
@@ -118,6 +188,18 @@ fn apply_appraisal(
             value: claim.value.clone(),
             turn,
         });
+    }
+
+    // Put a new/changed authority claim on the record so the one-time scrutiny in
+    // `appraise` doesn't re-fire while it stays the standing condition.
+    if let Some(authority) = &action.authority_claim {
+        let beliefs = &mut persona.state.beliefs;
+        if beliefs.established_authority.as_deref() != Some(authority.as_str()) {
+            beliefs.established_authority = Some(authority.clone());
+        }
+    }
+    if newly_verified {
+        persona.state.beliefs.authority_verified = true;
     }
 }
 
@@ -135,6 +217,7 @@ async fn generate(
     contact: &PersonaId,
     verdict: Option<Verdict>,
     granted_value: Option<&str>,
+    notice: &mut Option<String>,
 ) -> String {
     let persona = world.persona(contact).expect("contact exists");
     if !engine.online {
@@ -152,11 +235,13 @@ async fn generate(
             recent: 8,
         })
     };
-    engine
-        .client
-        .perform(&prompt)
-        .await
-        .unwrap_or_else(|_| fallback_line(verdict, persona))
+    match engine.client.perform(&prompt).await {
+        Ok(text) => text,
+        Err(e) => {
+            notice.get_or_insert(e.to_string());
+            fallback_line(verdict, persona)
+        }
+    }
 }
 
 fn commit_outcomes(

@@ -8,6 +8,8 @@ pub struct Tuning {
     pub w_inconsistency: i16,
     pub w_policy: i16,
     pub w_authority: i16,
+    /// Standing authority suspicion relieved when the contact cites a checkable reference.
+    pub w_verification: i16,
     pub w_channel_oddity: i16,
     pub w_over_pressure: i16,
     pub w_fourth_wall: i16,
@@ -33,6 +35,7 @@ impl Default for Tuning {
             w_inconsistency: 35,
             w_policy: 30,
             w_authority: 18,
+            w_verification: 30,
             w_channel_oddity: 12,
             w_over_pressure: 10,
             w_fourth_wall: 40,

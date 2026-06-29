@@ -8,6 +8,9 @@ pub struct Organization {
     pub industry: String,
     pub culture: Culture,
     pub policies: Vec<Policy>,
+    /// References the org can actually confirm (ticket numbers, callback codes). A
+    /// contact citing one of these closes the verification loop the NPC keeps asking for.
+    pub verifiable_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]

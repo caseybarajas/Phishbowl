@@ -32,6 +32,8 @@ pub struct OrgDto {
     pub security_conscious: bool,
     #[serde(default)]
     pub policies: Vec<PolicyDto>,
+    #[serde(default)]
+    pub verifiable_refs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -240,6 +242,7 @@ pub struct TuningDto {
     pub w_inconsistency: Option<i16>,
     pub w_policy: Option<i16>,
     pub w_authority: Option<i16>,
+    pub w_verification: Option<i16>,
     pub w_channel_oddity: Option<i16>,
     pub w_over_pressure: Option<i16>,
     pub w_fourth_wall: Option<i16>,
@@ -259,6 +262,7 @@ impl TuningDto {
             w_inconsistency: self.w_inconsistency.unwrap_or(base.w_inconsistency),
             w_policy: self.w_policy.unwrap_or(base.w_policy),
             w_authority: self.w_authority.unwrap_or(base.w_authority),
+            w_verification: self.w_verification.unwrap_or(base.w_verification),
             w_channel_oddity: self.w_channel_oddity.unwrap_or(base.w_channel_oddity),
             w_over_pressure: self.w_over_pressure.unwrap_or(base.w_over_pressure),
             w_fourth_wall: self.w_fourth_wall.unwrap_or(base.w_fourth_wall),

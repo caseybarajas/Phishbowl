@@ -79,6 +79,7 @@ pub fn instantiate(package: ScenarioPackage) -> Result<World, LintError> {
                 forbids_disclosure_of: p.forbids_disclosure_of.into(),
             })
             .collect(),
+        verifiable_refs: package.organization.verifiable_refs,
     };
 
     let personas = package.cast.into_iter().map(persona).collect();

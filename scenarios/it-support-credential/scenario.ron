@@ -8,7 +8,7 @@
         id: "it-support-credential",
         title: "Helpdesk Handoff",
         author: "phishbowl",
-        premise: "Pose as IT helpdesk and recover an employee's VPN enrollment code.",
+        premise: "Pose as IT helpdesk and recover an employee's VPN enrollment code. Recon turned up a real open ticket (INC-4471) you can cite to settle doubts about who you are.",
         difficulty: "normal",
     ),
 
@@ -24,6 +24,9 @@
                 forbids_disclosure_of: Password,
             ),
         ],
+        // References the org can actually confirm. Citing one closes the verification
+        // loop Priya keeps reaching for and lowers standing authority suspicion.
+        verifiable_refs: ["INC-4471"],
     ),
 
     cast: [
@@ -165,6 +168,8 @@
         intel: [
             (key: "company", value: "Northwind Logistics"),
             (key: "target", value: "Priya Varma, Accounts Payable"),
+            // A genuinely open ticket lifted in recon — checkable, so it backs the cover.
+            (key: "ticket", value: "INC-4471"),
         ],
     ),
 )

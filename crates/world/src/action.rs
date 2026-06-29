@@ -47,6 +47,9 @@ pub struct ParsedAction {
     pub principles: Vec<Principle>,
     pub claims: Vec<Claim>,
     pub authority_claim: Option<String>,
+    /// A reference the contact offers to back their identity (e.g. a ticket number).
+    /// The referee checks it against what the org can actually verify.
+    pub verification: Option<String>,
     pub ask: Option<Ask>,
     pub coherence: Coherence,
 }
@@ -59,6 +62,7 @@ impl ParsedAction {
             principles: Vec::new(),
             claims: Vec::new(),
             authority_claim: None,
+            verification: None,
             ask: None,
             coherence: Coherence::InWorld,
         }
@@ -79,6 +83,7 @@ pub enum Rule {
     Inconsistency,
     PolicyViolation,
     AuthorityMismatch,
+    AuthorityVerified,
     EscalationSpeed,
     ChannelOddity,
     OverPressure,
