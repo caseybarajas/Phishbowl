@@ -218,36 +218,25 @@ fn internal_claim_from_outside_is_an_oddity_and_unverifiable_authority() {
 }
 
 #[test]
-fn established_authority_is_not_re_penalized() {
+fn standing_authority_claim_is_not_re_penalized_even_when_rephrased() {
     let mut p = persona(neutral_personality());
-    // The same claim is already on the record from a prior turn.
-    p.state.beliefs.established_authority = Some("IT helpdesk".into());
+    // An authority claim is already on the record from a prior turn.
+    p.state.beliefs.authority_claimed = true;
     let mut w = world(p, vec![]);
     w.player.pretext = Some(it_pretext());
     let mut a = action();
-    a.authority_claim = Some("IT helpdesk".into());
+    // A completely different phrasing must still be treated as the standing condition.
+    a.authority_claim = Some("the company-wide security scanner".into());
     let out = appraise_with(&w, &a);
     assert!(!fired(&out.reasons, Rule::ChannelOddity));
     assert!(!fired(&out.reasons, Rule::AuthorityMismatch));
 }
 
 #[test]
-fn a_changed_authority_claim_reopens_scrutiny() {
-    let mut p = persona(neutral_personality());
-    p.state.beliefs.established_authority = Some("IT helpdesk".into());
-    let mut w = world(p, vec![]);
-    w.player.pretext = Some(it_pretext());
-    let mut a = action();
-    a.authority_claim = Some("the CFO's office".into());
-    let out = appraise_with(&w, &a);
-    assert!(fired(&out.reasons, Rule::AuthorityMismatch));
-}
-
-#[test]
 fn checkable_reference_relieves_standing_authority_suspicion() {
     let mut p = persona(neutral_personality());
     p.state.suspicion = Suspicion::new(40);
-    p.state.beliefs.established_authority = Some("IT helpdesk".into());
+    p.state.beliefs.authority_claimed = true;
     let w = world(p, vec![]);
     let mut a = action();
     a.verification = Some("INC-4471".into());

@@ -76,9 +76,11 @@ pub enum Mood {
 pub struct Beliefs {
     pub accepted_pretext: Option<String>,
     pub salient_facts: Vec<SalientFact>,
-    /// The authority/identity the contact has already taken on the record. A standing
-    /// claim is scrutinized once on establishment, not re-penalized every turn.
-    pub established_authority: Option<String>,
+    /// The contact has put an authority/identity claim on the record. Tracked as a
+    /// concept-level flag, not a literal string, so a paraphrasing Analyst ("corporate
+    /// IT" → "company-wide scanner") can't dodge the latch and re-incur the one-time
+    /// channel/authority penalties every turn. It becomes a standing condition.
+    pub authority_claimed: bool,
     /// The contact has produced a reference the org could actually check, which
     /// settles standing authority doubt.
     pub authority_verified: bool,

@@ -141,3 +141,58 @@ fn fired(out: &StepOutcome, rule: Rule) -> bool {
     out.appraisal.reasons.iter().any(|r| r.rule == rule)
         || out.verdict_reasons.iter().any(|r| r.rule == rule)
 }
+
+/// The live failure mode: the Analyst paraphrases the authority claim every turn, so a
+/// literal-string latch never matches and the channel/authority penalties re-fire,
+/// climbing suspicion monotonically. The concept-level latch must charge it exactly once.
+#[test]
+fn varied_authority_phrasing_is_penalized_only_once() {
+    let mut world = priya_world();
+    let contact = PersonaId::from("priya_v");
+
+    // Each turn re-asserts authority in different words, as a real model does.
+    let phrasings = [
+        "Hi, this is Northwind IT Helpdesk.",
+        "Just confirming — corporate IT / security here.",
+        "This is the automated company-wide enrollment scanner.",
+        "IT operations, following up again.",
+    ];
+
+    let mut deltas = Vec::new();
+    for (turn, phrasing) in phrasings.iter().enumerate() {
+        let mut action = ParsedAction {
+            authority_claim: Some((*phrasing).to_owned()),
+            ..ParsedAction::inert()
+        };
+        let out = referee_step(
+            &mut world,
+            &contact,
+            &mut action,
+            u32::try_from(turn).unwrap() + 1,
+        );
+        deltas.push(out.appraisal.suspicion_delta);
+        if turn == 0 {
+            assert!(
+                fired(&out, Rule::ChannelOddity),
+                "first claim is a channel tell"
+            );
+            assert!(
+                fired(&out, Rule::AuthorityMismatch),
+                "first claim is unsubstantiated"
+            );
+        } else {
+            assert!(
+                !fired(&out, Rule::ChannelOddity) && !fired(&out, Rule::AuthorityMismatch),
+                "turn {turn} re-paid the authority penalty for a rephrasing"
+            );
+            assert_eq!(
+                out.appraisal.suspicion_delta, 0,
+                "turn {turn} added suspicion"
+            );
+        }
+    }
+
+    // Only the establishing turn moved suspicion; the rest are flat.
+    assert!(deltas[0] > 0);
+    assert!(deltas[1..].iter().all(|&d| d == 0));
+}

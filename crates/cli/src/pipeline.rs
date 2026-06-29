@@ -190,13 +190,10 @@ fn commit_appraisal(
         });
     }
 
-    // Put a new/changed authority claim on the record so the one-time scrutiny in
-    // `appraise` doesn't re-fire while it stays the standing condition.
-    if let Some(authority) = &action.authority_claim {
-        let beliefs = &mut persona.state.beliefs;
-        if beliefs.established_authority.as_deref() != Some(authority.as_str()) {
-            beliefs.established_authority = Some(authority.clone());
-        }
+    // Latch the concept, not the wording: once an authority claim is on the record, the
+    // one-time scrutiny in `appraise` doesn't re-fire even as the Analyst paraphrases it.
+    if action.authority_claim.is_some() {
+        persona.state.beliefs.authority_claimed = true;
     }
     if newly_verified {
         persona.state.beliefs.authority_verified = true;

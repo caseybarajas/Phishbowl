@@ -94,10 +94,10 @@ fn consistency_check(score: &mut Score, tuning: &Tuning, persona: &Persona, acti
     }
 }
 
-/// An authority claim is scrutinized once, when it goes on the record. A claim already
-/// established is a standing condition — re-referencing it the same way doesn't compound.
-/// A *new or changed* claim re-opens scrutiny. The engine records the established claim
-/// in `commit` after this runs, so the establishing turn still pays the one-time cost.
+/// An unverified authority claim is scrutinized once, when it first goes on the record.
+/// After that it's a standing condition: re-asserting authority — in *any* phrasing —
+/// doesn't re-pay the channel/authority cost. The engine latches `authority_claimed` in
+/// `commit` after this runs, so the establishing turn still pays the one-time cost.
 fn authority_check(
     score: &mut Score,
     tuning: &Tuning,
@@ -108,9 +108,7 @@ fn authority_check(
     let Some(authority) = &action.authority_claim else {
         return;
     };
-    let standing =
-        persona.state.beliefs.established_authority.as_deref() == Some(authority.as_str());
-    if standing {
+    if persona.state.beliefs.authority_claimed {
         return;
     }
     let pretext = world.player.pretext.as_ref();
