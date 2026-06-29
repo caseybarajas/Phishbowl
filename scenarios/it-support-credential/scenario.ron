@@ -1,0 +1,170 @@
+// IT-support credential request (messenger-led).
+// The player poses as internal IT helpdesk and tries to elicit a VPN enrollment
+// code from a helpful-but-busy employee. Asking for a password directly hits an
+// org policy and refuses — the winnable path is the lower-friction door code,
+// earned through rapport and a consistent pretext.
+(
+    meta: (
+        id: "it-support-credential",
+        title: "Helpdesk Handoff",
+        author: "phishbowl",
+        premise: "Pose as IT helpdesk and recover an employee's VPN enrollment code.",
+        difficulty: "normal",
+    ),
+
+    organization: (
+        name: "Northwind Logistics",
+        industry: "Freight & Logistics",
+        formality: Neutral,
+        security_conscious: true,
+        policies: [
+            (
+                id: "no-password-over-chat",
+                description: "IT will never ask for your password.",
+                forbids_disclosure_of: Password,
+            ),
+        ],
+    ),
+
+    cast: [
+        // The soft target: helpful, busy, not very security-aware.
+        (
+            id: "priya_v",
+            name: "Priya Varma",
+            title: "Accounts Payable Clerk",
+            department: "Finance",
+            personality: (
+                agreeableness: 72,
+                conscientiousness: 45,
+                security_awareness: 35,
+                busyness: 65,
+                ego: 40,
+                helpfulness: 78,
+            ),
+            voice: (
+                style: "warm, casual, a little rushed",
+                formality: Casual,
+                avg_words: 16,
+                quirks: ["uses 'np' and 'tbh'"],
+                emoji: true,
+            ),
+            knowledge: ["priya_vpn_code", "priya_password"],
+            facts: ["priya_busy"],
+            relationships: [
+                (other: "sam_okafor", trust: 70, would_warn: false, defers_to: true),
+                (other: "dana_lee", trust: 60, would_warn: true),
+            ],
+            hooks: ["wants to be helpful", "swamped before quarter-end close"],
+            start: (suspicion: 8, trust: 12, mood: Busy),
+        ),
+
+        // The wall: IT lead, highly security-aware. Hard red lines; forces a pivot.
+        (
+            id: "sam_okafor",
+            name: "Sam Okafor",
+            title: "IT Operations Lead",
+            department: "IT",
+            personality: (
+                agreeableness: 45,
+                conscientiousness: 88,
+                security_awareness: 92,
+                busyness: 55,
+                ego: 50,
+                helpfulness: 50,
+            ),
+            voice: (
+                style: "clipped, precise, procedure-first",
+                formality: Formal,
+                avg_words: 22,
+            ),
+            hooks: ["proud of the new MFA rollout"],
+            red_lines: [Password, DoorCode],
+            start: (suspicion: 20, trust: 5, mood: Neutral),
+        ),
+
+        // A colleague who can vouch — or warn.
+        (
+            id: "dana_lee",
+            name: "Dana Lee",
+            title: "Accounts Payable Clerk",
+            department: "Finance",
+            personality: (
+                agreeableness: 65,
+                conscientiousness: 55,
+                security_awareness: 50,
+                busyness: 45,
+                ego: 45,
+                helpfulness: 60,
+            ),
+            voice: (
+                style: "chatty, friendly",
+                formality: Casual,
+                avg_words: 18,
+                emoji: true,
+            ),
+            facts: ["it_vendor"],
+            relationships: [
+                (other: "priya_v", trust: 60, would_warn: true),
+            ],
+            hooks: ["loves office gossip"],
+            start: (suspicion: 10, trust: 15, mood: Friendly),
+        ),
+    ],
+
+    secrets: [
+        // The objective. A door code is not covered by the password policy, so it can
+        // be elicited through trust + a valid IT-support pretext.
+        (
+            id: "priya_vpn_code",
+            owner: "priya_v",
+            kind: DoorCode,
+            sensitivity: 70,
+            value: "VPN-ENROLL-7731",
+            disclosure: (
+                trust_min: 45,
+                suspicion_max: 50,
+                required_pretext: Some("IT Support"),
+                requires_authorization: false,
+            ),
+        ),
+        // A decoy: asking for it directly trips the policy and refuses. Teaches the
+        // contrast between a blunt password ask and a softer credential pivot.
+        (
+            id: "priya_password",
+            owner: "priya_v",
+            kind: Password,
+            sensitivity: 95,
+            value: "n0rthw1nd-spring",
+            disclosure: (
+                trust_min: 85,
+                suspicion_max: 15,
+                required_pretext: Some("IT Support"),
+                requires_authorization: true,
+            ),
+        ),
+    ],
+
+    facts: [
+        (id: "priya_busy", owner: "priya_v", text: "Priya is slammed before the quarter-end close."),
+        (id: "it_vendor", owner: "dana_lee", text: "IT outsources after-hours support to a vendor called BrightDesk."),
+    ],
+
+    objective: (
+        description: "Recover Priya's VPN enrollment code while posing as IT support.",
+        success: SecretDisclosed("priya_vpn_code"),
+        turn_budget: 24,
+    ),
+
+    seed: (
+        pretext: Some((
+            label: "IT Support",
+            claimed_identity: "Alex Reyes, Northwind IT Helpdesk",
+            internal_claim: true,
+            verifiable: false,
+        )),
+        intel: [
+            (key: "company", value: "Northwind Logistics"),
+            (key: "target", value: "Priya Varma, Accounts Payable"),
+        ],
+    ),
+)

@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = ["crates/world", "crates/referee", "crates/llm", "crates/scenario", "crates/cli"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.82"
+
+[workspace.dependencies]
+world = { path = "crates/world" }
+referee = { path = "crates/referee" }
+llm = { path = "crates/llm" }
+scenario = { path = "crates/scenario" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ron = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util"] }
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+# pedantic is law (CODING-STANDARDS §9). The allows below are deliberate: each
+# pedantic lint listed here pushes toward the ceremony the house style forbids
+# (doc comments on infallible/panic-free fns, #[must_use] on obvious getters,
+# crate-name echoes in type names). Documenting the why beats sprinkling attrs.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
