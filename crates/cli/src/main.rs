@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use llm::OllamaClient;
+use llm::{LlmConfig, OllamaClient};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use world::{PersonaId, RunStatus, SuccessCondition, Verdict, World};
 
@@ -23,9 +23,12 @@ struct Args {
     /// Ollama base URL.
     #[arg(long, default_value = "http://localhost:11434")]
     ollama: String,
-    /// Shared base model served by Ollama.
-    #[arg(long, default_value = "llama3.1")]
-    model: String,
+    /// Player config (model name lives here). Missing file falls back to defaults.
+    #[arg(long, default_value = "phishbowl.toml")]
+    config: PathBuf,
+    /// Override the configured model. Any string; passed to Ollama verbatim.
+    #[arg(long)]
+    model: Option<String>,
     /// Skip Ollama entirely; drive the engine with deterministic fallbacks.
     #[arg(long)]
     offline: bool,
@@ -37,7 +40,10 @@ async fn main() -> Result<()> {
     let mut world = scenario::load(&args.scenario)
         .with_context(|| format!("loading scenario {}", args.scenario.display()))?;
 
-    let client = OllamaClient::new(args.ollama.clone(), args.model.clone());
+    let model = args
+        .model
+        .unwrap_or_else(|| LlmConfig::load(&args.config).model);
+    let client = OllamaClient::new(args.ollama.clone(), model);
     let online = !args.offline && client.is_up().await;
     let engine = Engine { client, online };
 
@@ -121,13 +127,14 @@ async fn briefing(
     } else {
         "offline (deterministic fallback)"
     };
+    let model = engine.client.model();
     let pretext = world
         .player
         .pretext
         .as_ref()
         .map_or("none", |p| p.claimed_identity.as_str());
     let lines = format!(
-        "== {org} ==\n{desc}\nturn budget: {budget} · mode: {mode}\nyour pretext: {pretext}\nopening contact: {contact}\n\n{HELP}\n",
+        "== {org} ==\n{desc}\nturn budget: {budget} · mode: {mode} · model: {model}\nyour pretext: {pretext}\nopening contact: {contact}\n\n{HELP}\n",
         org = world.org.name,
         desc = world.objective.description,
         budget = world.objective.turn_budget,

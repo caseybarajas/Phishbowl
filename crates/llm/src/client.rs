@@ -27,6 +27,10 @@ impl OllamaClient {
         }
     }
 
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     pub async fn is_up(&self) -> bool {
         (self
             .http

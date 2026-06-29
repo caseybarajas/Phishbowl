@@ -1,0 +1,10 @@
+# Phishbowl player config. Edit and re-run; the CLI `--model` flag overrides this.
+
+# The base model every character runs on. Passed to the local Ollama API verbatim:
+# any value works, with no allowlist. Use a local name for fully-offline play, or a
+# ":cloud" name that the local Ollama server proxies (still one API, one string).
+#   model = "llama3.1"
+#   model = "qwen2.5:14b"
+#   model = "gpt-oss:120b-cloud"
+#
+# Left commented, Phishbowl uses its default small local model.
