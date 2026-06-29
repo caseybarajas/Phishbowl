@@ -8,7 +8,7 @@ Unlike defensive phishing platforms (Gophish, KnowBe4, Arsen) that test *your* e
 
 ---
 
-## Ethics & Intended Use — read this first
+## Ethics & Intended Use
 
 Phishbowl is a **training tool**. It exists to help security professionals understand and practice social-engineering tradecraft in a fully simulated environment so they can better defend against it.
 
@@ -26,7 +26,7 @@ By using Phishbowl you agree to use it for lawful, authorized, educational purpo
 
 1. **Briefing.** You receive a scenario: the target org, your objective (e.g. "obtain VPN credentials from someone in Finance"), and any starting intel.
 2. **Recon.** Explore the simulated social feed and directories to learn who's who, build a target list, and find pretext hooks.
-3. **Engage.** Open conversations in the messenger or email client. Each NPC is a stateful LLM persona — they remember what you've said, react to inconsistencies, and escalate suspicion.
+3. **Engage.** Open conversations in the messenger or email client. Each NPC is a stateful LLM persona. They they remember what you've said, react to inconsistencies, and escalate suspicion.
 4. **Pivot & escalate.** Use information from one persona to gain trust with another. Chain small wins into your objective.
 5. **Outcome & scoring.** Win by achieving the objective. Lose if suspicion trips a "security team" response. Get scored on stealth, efficiency, and technique.
 
