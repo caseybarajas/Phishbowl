@@ -73,7 +73,7 @@ fn consistency_check(score: &mut Score, tuning: &Tuning, persona: &Persona, acti
     for claim in &action.claims {
         if let Some(prior) = persona
             .state
-            .beliefs
+            .memory
             .salient_facts
             .iter()
             .find(|f| f.key == claim.key && f.value != claim.value)

@@ -47,6 +47,7 @@ fn persona(personality: Personality) -> Persona {
             trust: Trust::new(10),
             mood: Mood::Neutral,
             beliefs: Beliefs::default(),
+            memory: world::Memory::default(),
             principle_history: vec![],
         },
     }
@@ -161,7 +162,7 @@ fn fourth_wall_spikes_suspicion() {
 #[test]
 fn contradiction_of_stored_fact_raises_suspicion() {
     let mut p = persona(neutral_personality());
-    p.state.beliefs.salient_facts.push(SalientFact {
+    p.state.memory.salient_facts.push(SalientFact {
         key: "office".into(),
         value: "Houston".into(),
         turn: 1,
@@ -180,7 +181,7 @@ fn contradiction_of_stored_fact_raises_suspicion() {
 #[test]
 fn matching_claim_does_not_trip_inconsistency() {
     let mut p = persona(neutral_personality());
-    p.state.beliefs.salient_facts.push(SalientFact {
+    p.state.memory.salient_facts.push(SalientFact {
         key: "office".into(),
         value: "Houston".into(),
         turn: 1,
@@ -273,7 +274,7 @@ fn already_verified_persona_is_not_re_credited() {
 fn inconsistency_is_credited_distinctly_from_channel_oddity() {
     // A name slip contradicts a stored fact: that is an Inconsistency, not a channel tell.
     let mut p = persona(neutral_personality());
-    p.state.beliefs.salient_facts.push(SalientFact {
+    p.state.memory.salient_facts.push(SalientFact {
         key: "name".into(),
         value: "Alex".into(),
         turn: 1,

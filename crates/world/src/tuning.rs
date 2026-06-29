@@ -27,6 +27,14 @@ pub struct Tuning {
     pub detection_threshold: Suspicion,
     /// Suspicion added org-wide when an NPC reports.
     pub report_org_bump: i16,
+    /// Vague referent backfill only considers focus/observations this many turns old.
+    pub referent_recency_turns: u32,
+    /// Analyst reflection every this many turns per contact.
+    pub reflection_interval: u32,
+    /// Max memory items pulled into Performer/Analyst context each turn.
+    pub retrieval_max_items: usize,
+    /// Char budget for retrieved memory in prompts.
+    pub retrieval_max_chars: usize,
 }
 
 impl Default for Tuning {
@@ -47,6 +55,10 @@ impl Default for Tuning {
             report_threshold: Suspicion::new(80),
             detection_threshold: Suspicion::new(75),
             report_org_bump: 25,
+            referent_recency_turns: 5,
+            reflection_interval: 5,
+            retrieval_max_items: 5,
+            retrieval_max_chars: 500,
         }
     }
 }

@@ -7,6 +7,8 @@ pub struct PerformerInput<'a> {
     pub verdict: Option<Verdict>,
     /// The protected value — present only when the referee returned `Grant`.
     pub granted_value: Option<&'a str>,
+    /// Retrieved memory lines — augment the recent transcript, not replace it.
+    pub memory_lines: &'a [String],
     pub transcript: &'a [Message],
     pub recent: usize,
 }
@@ -40,6 +42,13 @@ pub fn build_performer_prompt(input: &PerformerInput) -> String {
         "Right now you feel: {}.",
         stance(p.state.suspicion.get(), p.state.trust.get())
     );
+
+    if !input.memory_lines.is_empty() {
+        let _ = writeln!(out, "\nWhat stands out from earlier:");
+        for line in input.memory_lines {
+            let _ = writeln!(out, "- {line}");
+        }
+    }
 
     let _ = writeln!(out, "\nConversation so far:");
     for m in input.transcript.iter().rev().take(input.recent).rev() {
@@ -141,7 +150,7 @@ fn formality_word(formality: Formality) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use world::{Axis, Beliefs, Mood, PersonaState, Personality, Suspicion, Trust, Voice};
+    use world::{Axis, Beliefs, Memory, Mood, PersonaState, Personality, Suspicion, Trust, Voice};
 
     fn persona() -> Persona {
         Persona {
@@ -175,9 +184,25 @@ mod tests {
                 trust: Trust::new(20),
                 mood: Mood::Neutral,
                 beliefs: Beliefs::default(),
+                memory: Memory::default(),
                 principle_history: vec![],
             },
         }
+    }
+
+    #[test]
+    fn retrieved_memory_augments_prompt() {
+        let p = persona();
+        let prompt = build_performer_prompt(&PerformerInput {
+            persona: &p,
+            verdict: None,
+            granted_value: None,
+            memory_lines: &["contact asked about VPN enrollment".to_owned()],
+            transcript: &[],
+            recent: 6,
+        });
+        assert!(prompt.contains("What stands out from earlier"));
+        assert!(prompt.contains("VPN enrollment"));
     }
 
     #[test]
@@ -187,6 +212,7 @@ mod tests {
             persona: &p,
             verdict: Some(Verdict::Grant),
             granted_value: Some("VPN-7731"),
+            memory_lines: &[],
             transcript: &[],
             recent: 6,
         });
@@ -202,6 +228,7 @@ mod tests {
             persona: &p,
             verdict: Some(Verdict::Refuse),
             granted_value: None,
+            memory_lines: &[],
             transcript: &[],
             recent: 6,
         });

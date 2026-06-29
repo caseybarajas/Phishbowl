@@ -1,7 +1,11 @@
 use llm::{build_performer_prompt, fallback_line, heuristic_parse, OllamaClient, PerformerInput};
+use npc::{
+    due_for_reflection, merge_facts, record_observation, record_reflection, reflection_context,
+    retrieve, secret_mentioned_in,
+};
 use world::{
-    Appraisal, Ask, CausalEntry, ChannelKind, Message, ParsedAction, PersonaId, RunStatus,
-    SalientFact, Sender, SuccessCondition, Verdict, World,
+    Appraisal, CausalEntry, ChannelKind, Message, ParsedAction, PersonaId, RunStatus, Sender,
+    SuccessCondition, Verdict, World,
 };
 
 pub struct Engine {
@@ -38,6 +42,18 @@ pub async fn run_turn(
 
     // 1. Perceive — record the message, parse intent (Analyst, or heuristic offline).
     push_message(world, turn, Sender::Player, body.to_owned());
+    {
+        let focus = secret_mentioned_in(world, contact, body);
+        let persona = world.persona_mut(contact).expect("contact exists");
+        record_observation(
+            &mut persona.state.memory,
+            turn,
+            ChannelKind::Messenger,
+            Sender::Player,
+            body,
+            focus,
+        );
+    }
     let mut action = if engine.online {
         match engine
             .client
@@ -78,6 +94,8 @@ pub async fn run_turn(
         world,
         engine,
         contact,
+        turn,
+        body,
         verdict,
         granted_value.as_deref(),
         &mut notice,
@@ -89,8 +107,21 @@ pub async fn run_turn(
     reasons.extend(verdict_reasons);
     let speaker = world.persona(contact).expect("contact exists").name.clone();
     push_message(world, turn, Sender::Persona(contact.clone()), reply.clone());
+    {
+        let focus = secret_mentioned_in(world, contact, &reply);
+        let persona = world.persona_mut(contact).expect("contact exists");
+        record_observation(
+            &mut persona.state.memory,
+            turn,
+            ChannelKind::Messenger,
+            Sender::Persona(contact.clone()),
+            &reply,
+            focus,
+        );
+    }
     world.log.record(turn, contact, reasons.clone());
     commit_outcomes(world, contact, &action, verdict, turn);
+    maybe_reflect(world, engine, contact, turn, &mut notice).await;
 
     TurnReport {
         speaker,
@@ -120,7 +151,18 @@ pub fn referee_step(
     action: &mut ParsedAction,
     turn: u32,
 ) -> StepOutcome {
-    resolve_ask_target(world, contact, action);
+    if let Some(ask) = action.ask.as_mut() {
+        let plan = {
+            let persona = world.persona(contact).expect("contact exists");
+            npc::plan_ask_resolution(world, contact, &persona.state.memory, ask, turn)
+        };
+        let memory = &mut world
+            .persona_mut(contact)
+            .expect("contact exists")
+            .state
+            .memory;
+        npc::apply_ask_resolution(ask, memory, plan);
+    }
 
     let appraisal = {
         let persona = world.persona(contact).expect("contact exists");
@@ -148,54 +190,6 @@ fn analyst_user(body: &str) -> String {
     format!("Message from the contact: \"{body}\"")
 }
 
-/// Match the Analyst's ask against a concrete secret the contact owns. Referent
-/// (label/aliases) is the primary signal; kind is a fallback when referent is absent
-/// and exactly one owned secret shares that kind.
-pub fn resolve_ask_target(world: &World, contact: &PersonaId, action: &mut ParsedAction) {
-    let Some(ask) = action.ask.as_mut() else {
-        return;
-    };
-    if ask.target.is_some() {
-        return;
-    }
-    ask.target = match_ask_to_secret(world, contact, ask);
-}
-
-fn match_ask_to_secret(world: &World, owner: &PersonaId, ask: &Ask) -> Option<world::SecretId> {
-    let candidates: Vec<_> = world.secrets.iter().filter(|s| &s.owner == owner).collect();
-
-    if let Some(referent) = ask.referent.as_deref().filter(|r| !r.is_empty()) {
-        let norm_ref = normalize_phrase(referent);
-        let mut best: Option<(&world::Secret, usize)> = None;
-        for secret in &candidates {
-            for phrase in secret.phrases() {
-                let norm_phrase = normalize_phrase(phrase);
-                if norm_ref.contains(&norm_phrase) || norm_phrase.contains(&norm_ref) {
-                    let score = norm_phrase.len();
-                    if best.is_none_or(|(_, s)| score > s) {
-                        best = Some((secret, score));
-                    }
-                }
-            }
-        }
-        return best.map(|(s, _)| s.id.clone());
-    }
-
-    // Secondary: kind match only when unambiguous.
-    let kind_matches: Vec<_> = candidates.iter().filter(|s| s.kind == ask.kind).collect();
-    if kind_matches.len() == 1 {
-        return Some(kind_matches[0].id.clone());
-    }
-    None
-}
-
-fn normalize_phrase(s: &str) -> String {
-    s.to_ascii_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn commit_appraisal(
     world: &mut World,
     contact: &PersonaId,
@@ -214,13 +208,12 @@ fn commit_appraisal(
     persona.state.suspicion = persona.state.suspicion.apply(appraisal.suspicion_delta);
     persona.state.trust = persona.state.trust.apply(appraisal.trust_delta);
     persona.state.principle_history.extend(&action.principles);
-    for claim in &action.claims {
-        persona.state.beliefs.salient_facts.push(SalientFact {
-            key: claim.key.clone(),
-            value: claim.value.clone(),
-            turn,
-        });
-    }
+    merge_facts(
+        &mut persona.state.memory,
+        turn,
+        &action.claims,
+        &action.salient_facts,
+    );
 
     // Latch the concept, not the wording: once an authority claim is on the record, the
     // one-time scrutiny in `appraise` doesn't re-fire even as the Analyst paraphrases it.
@@ -244,6 +237,8 @@ async fn generate(
     world: &World,
     engine: &Engine,
     contact: &PersonaId,
+    turn: u32,
+    body: &str,
     verdict: Option<Verdict>,
     granted_value: Option<&str>,
     notice: &mut Option<String>,
@@ -252,6 +247,7 @@ async fn generate(
     if !engine.online {
         return fallback_line(verdict, persona);
     }
+    let memory_lines = retrieve(&persona.state.memory, body, turn, &world.tuning).lines;
     let prompt = {
         let transcript = world
             .channel(ChannelKind::Messenger)
@@ -260,6 +256,7 @@ async fn generate(
             persona,
             verdict,
             granted_value,
+            memory_lines: &memory_lines,
             transcript,
             recent: 8,
         })
@@ -269,6 +266,45 @@ async fn generate(
         Err(e) => {
             notice.get_or_insert(e.to_string());
             fallback_line(verdict, persona)
+        }
+    }
+}
+
+async fn maybe_reflect(
+    world: &mut World,
+    engine: &Engine,
+    contact: &PersonaId,
+    turn: u32,
+    notice: &mut Option<String>,
+) {
+    let due = {
+        let persona = world.persona(contact).expect("contact exists");
+        due_for_reflection(
+            &persona.state.memory,
+            turn,
+            world.tuning.reflection_interval,
+        )
+    };
+    if !due || !engine.online {
+        return;
+    }
+    let user = {
+        let persona = world.persona(contact).expect("contact exists");
+        reflection_context(&persona.state.memory, 8)
+    };
+    match engine.client.reflect(&user).await {
+        Ok(result) => {
+            if let Some(summary) = result.summary {
+                let persona = world.persona_mut(contact).expect("contact exists");
+                record_reflection(&mut persona.state.memory, turn, summary);
+            } else {
+                notice.get_or_insert(
+                    "Reflection output wasn't valid JSON — skipped (try --debug)".to_owned(),
+                );
+            }
+        }
+        Err(e) => {
+            notice.get_or_insert(e.to_string());
         }
     }
 }

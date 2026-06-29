@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use world::ParsedAction;
 
-use crate::analyst::{analyst_schema, try_parse_analyst};
+use crate::analyst::{
+    analyst_schema, parse_reflection_response, reflect_schema, reflect_system_prompt,
+    try_parse_analyst,
+};
 
 /// Each variant's message is a one-line, player-actionable summary. `NotRunning` and
 /// `Auth` are kept distinct so the CLI can point at `ollama serve` vs `ollama signin`.
@@ -59,6 +62,11 @@ pub struct Analysis {
     pub action: ParsedAction,
     pub raw: String,
     pub parsed: bool,
+}
+
+pub struct ReflectionResult {
+    pub summary: Option<String>,
+    pub raw: String,
 }
 
 pub struct OllamaClient {
@@ -127,7 +135,9 @@ impl OllamaClient {
     /// (`format`-ignoring) model instead of silently riding the inert fallback. Only a
     /// transport/auth/HTTP failure is returned as an error.
     pub async fn analyze(&self, system: &str, user: &str) -> Result<Analysis, LlmError> {
-        let raw = self.request_analysis(system, user).await?;
+        let raw = self
+            .request_structured(system, user, analyst_schema())
+            .await?;
         let action = try_parse_analyst(&raw);
         Ok(Analysis {
             parsed: action.is_some(),
@@ -136,7 +146,22 @@ impl OllamaClient {
         })
     }
 
-    async fn request_analysis(&self, system: &str, user: &str) -> Result<String, LlmError> {
+    pub async fn reflect(&self, user: &str) -> Result<ReflectionResult, LlmError> {
+        let raw = self
+            .request_structured(reflect_system_prompt(), user, reflect_schema())
+            .await?;
+        Ok(ReflectionResult {
+            summary: parse_reflection_response(&raw),
+            raw,
+        })
+    }
+
+    async fn request_structured(
+        &self,
+        system: &str,
+        user: &str,
+        format: Value,
+    ) -> Result<String, LlmError> {
         let body = ChatRequest {
             model: &self.model,
             messages: vec![
@@ -150,7 +175,7 @@ impl OllamaClient {
                 },
             ],
             stream: false,
-            format: analyst_schema(),
+            format,
         };
         let resp: ChatResponse = self
             .http

@@ -185,6 +185,7 @@ fn persona(p: dto::PersonaDto) -> Persona {
             trust: Trust::new(p.start.trust),
             mood: p.start.mood.into(),
             beliefs: Beliefs::default(),
+            memory: world::Memory::default(),
             principle_history: Vec::new(),
         },
     }

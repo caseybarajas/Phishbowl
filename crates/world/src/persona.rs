@@ -1,5 +1,6 @@
 use crate::action::{Principle, SecretKind};
 use crate::ids::{FactId, PersonaId, SecretId};
+use crate::memory::Memory;
 use crate::units::{Axis, Suspicion, Trust};
 
 #[derive(Debug, Clone)]
@@ -59,6 +60,7 @@ pub struct PersonaState {
     pub trust: Trust,
     pub mood: Mood,
     pub beliefs: Beliefs,
+    pub memory: Memory,
     /// Principles this contact has leaned on, in order. Feeds reactance scoring.
     pub principle_history: Vec<Principle>,
 }
@@ -75,7 +77,6 @@ pub enum Mood {
 #[derive(Debug, Clone, Default)]
 pub struct Beliefs {
     pub accepted_pretext: Option<String>,
-    pub salient_facts: Vec<SalientFact>,
     /// The contact has put an authority/identity claim on the record. Tracked as a
     /// concept-level flag, not a literal string, so a paraphrasing Analyst ("corporate
     /// IT" → "company-wide scanner") can't dodge the latch and re-incur the one-time
@@ -84,11 +85,4 @@ pub struct Beliefs {
     /// The contact has produced a reference the org could actually check, which
     /// settles standing authority doubt.
     pub authority_verified: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct SalientFact {
-    pub key: String,
-    pub value: String,
-    pub turn: u32,
 }

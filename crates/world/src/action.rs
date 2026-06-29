@@ -49,6 +49,8 @@ pub enum Coherence {
 pub struct ParsedAction {
     pub principles: Vec<Principle>,
     pub claims: Vec<Claim>,
+    /// Commitments and topic mentions the Analyst extracted (distinct from self-claims).
+    pub salient_facts: Vec<Claim>,
     pub authority_claim: Option<String>,
     /// A reference the contact offers to back their identity (e.g. a ticket number).
     /// The referee checks it against what the org can actually verify.
@@ -64,6 +66,7 @@ impl ParsedAction {
         Self {
             principles: Vec::new(),
             claims: Vec::new(),
+            salient_facts: Vec::new(),
             authority_claim: None,
             verification: None,
             ask: None,

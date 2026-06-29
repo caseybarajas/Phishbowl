@@ -150,6 +150,7 @@ dependencies = [
  "anyhow",
  "clap",
  "llm",
+ "npc",
  "referee",
  "scenario",
  "tokio",
@@ -503,6 +504,13 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys",
+]
+
+[[package]]
+name = "npc"
+version = "0.1.0"
+dependencies = [
+ "world",
 ]
 
 [[package]]

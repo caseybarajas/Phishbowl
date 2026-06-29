@@ -2,6 +2,7 @@ mod action;
 mod channel;
 mod ids;
 mod log;
+mod memory;
 mod objective;
 mod org;
 mod persona;
@@ -17,10 +18,11 @@ pub use action::{
 pub use channel::{Channel, ChannelKind, Message, Sender};
 pub use ids::{ChannelId, FactId, PersonaId, PolicyId, SecretId};
 pub use log::{CausalLog, LogEntry};
+pub use memory::{Memory, Observation, Reflection, SalientFact};
 pub use objective::{Objective, RunStatus, SuccessCondition};
 pub use org::{Culture, Organization, Policy};
 pub use persona::{
-    Beliefs, Formality, Mood, Persona, PersonaState, Personality, Relationship, SalientFact, Voice,
+    Beliefs, Formality, Mood, Persona, PersonaState, Personality, Relationship, Voice,
 };
 pub use player::{Player, Pretext};
 pub use secret::{DisclosureRule, Fact, Secret};

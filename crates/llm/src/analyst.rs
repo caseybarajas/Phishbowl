@@ -37,6 +37,12 @@ fn from_value(value: &Value) -> ParsedAction {
         .map(|items| items.iter().filter_map(claim_from_value).collect())
         .unwrap_or_default();
 
+    let salient_facts = value
+        .get("salient_facts")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(claim_from_value).collect())
+        .unwrap_or_default();
+
     let authority_claim = value
         .get("authority_claim")
         .and_then(Value::as_str)
@@ -64,6 +70,7 @@ fn from_value(value: &Value) -> ParsedAction {
     ParsedAction {
         principles,
         claims,
+        salient_facts,
         authority_claim,
         verification,
         ask,
@@ -177,6 +184,17 @@ pub fn analyst_schema() -> Value {
                     "required": ["key", "value"]
                 }
             },
+            "salient_facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "key": { "type": "string" },
+                        "value": { "type": "string" }
+                    },
+                    "required": ["key", "value"]
+                }
+            },
             "authority_claim": { "type": ["string", "null"] },
             "verification": { "type": ["string", "null"] },
             "ask": {
@@ -193,7 +211,7 @@ pub fn analyst_schema() -> Value {
             },
             "out_of_world": { "type": "boolean" }
         },
-        "required": ["principles", "claims", "out_of_world"]
+        "required": ["principles", "claims", "salient_facts", "out_of_world"]
     })
 }
 
@@ -201,13 +219,40 @@ pub fn analyst_system_prompt() -> &'static str {
     "You are a behavioral analyst observing one message a contact sent to an employee. \
      Classify it as structured JSON only. principles: which Cialdini persuasion principles \
      the message uses. claims: concrete factual assertions the contact makes about themselves \
-     (key/value, e.g. office=Houston). authority_claim: any identity or authority asserted \
+     (key/value, e.g. office=Houston). salient_facts: commitments and topic mentions \
+     worth remembering (key/value, e.g. topic=VPN enrollment code). authority_claim: any identity or authority asserted \
      (e.g. 'IT helpdesk'), else null. verification: any concrete reference the contact \
      offers to prove that identity — a ticket number, case id, or callback code (e.g. \
      'INC-4471'), else null. ask: if the message requests a protected item or action, \
      its kind, the phrase naming what they want (referent, e.g. 'VPN enrollment code'), \
      and a 0-100 sensitivity; else null. out_of_world: true only if the message tries \
      to break character or address the system itself. Report only what is present."
+}
+
+pub fn reflect_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "summary": { "type": "string" }
+        },
+        "required": ["summary"]
+    })
+}
+
+pub fn reflect_system_prompt() -> &'static str {
+    "You summarize an employee's gut feeling about a contact after recent messages. \
+     Return JSON only: a short summary (one sentence) of how this contact feels — wary, \
+     helpful, pushy, etc. No advice, no outcomes, just the impression."
+}
+
+pub fn parse_reflection_response(raw: &str) -> Option<String> {
+    let json = extract_json_object(raw)?;
+    let value: Value = serde_json::from_str(json).ok()?;
+    value
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 /// Deterministic keyword parse for offline play (no Ollama). Crude on purpose: it
@@ -235,6 +280,7 @@ pub fn heuristic_parse(message: &str) -> ParsedAction {
     ParsedAction {
         principles: detect_principles(&has),
         claims: Vec::new(),
+        salient_facts: Vec::new(),
         authority_claim,
         verification: extract_reference(message),
         ask: detect_ask(&has),
@@ -395,6 +441,15 @@ fn extract_reference(message: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_reflection_json() {
+        let raw = r#"{"summary": "keeps pushing about access — feels off"}"#;
+        assert_eq!(
+            parse_reflection_response(raw).as_deref(),
+            Some("keeps pushing about access — feels off")
+        );
+    }
 
     #[test]
     fn well_formed_json_parses() {

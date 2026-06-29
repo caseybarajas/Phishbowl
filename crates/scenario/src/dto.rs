@@ -257,6 +257,10 @@ pub struct TuningDto {
     pub report_threshold: Option<u8>,
     pub detection_threshold: Option<u8>,
     pub report_org_bump: Option<i16>,
+    pub referent_recency_turns: Option<u32>,
+    pub reflection_interval: Option<u32>,
+    pub retrieval_max_items: Option<usize>,
+    pub retrieval_max_chars: Option<usize>,
 }
 
 impl TuningDto {
@@ -283,6 +287,12 @@ impl TuningDto {
                 .detection_threshold
                 .map_or(base.detection_threshold, world::Suspicion::new),
             report_org_bump: self.report_org_bump.unwrap_or(base.report_org_bump),
+            referent_recency_turns: self
+                .referent_recency_turns
+                .unwrap_or(base.referent_recency_turns),
+            reflection_interval: self.reflection_interval.unwrap_or(base.reflection_interval),
+            retrieval_max_items: self.retrieval_max_items.unwrap_or(base.retrieval_max_items),
+            retrieval_max_chars: self.retrieval_max_chars.unwrap_or(base.retrieval_max_chars),
         }
     }
 }

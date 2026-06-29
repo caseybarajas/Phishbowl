@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/world", "crates/referee", "crates/llm", "crates/scenario", "crates/cli"]
+members = ["crates/world", "crates/referee", "crates/npc", "crates/llm", "crates/scenario", "crates/cli"]
 
 [workspace.package]
 edition = "2021"
@@ -10,6 +10,7 @@ rust-version = "1.82"
 [workspace.dependencies]
 world = { path = "crates/world" }
 referee = { path = "crates/referee" }
+npc = { path = "crates/npc" }
 llm = { path = "crates/llm" }
 scenario = { path = "crates/scenario" }
 
